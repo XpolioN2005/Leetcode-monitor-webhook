@@ -54,10 +54,3 @@ jobs:
           name: leetcode-cache
           # upload the cache dir (script writes cache/leetcode_stats_cache.json)
           path: cache/leetcode_stats_cache.json
-
-      - name: Upload raw responses (optional)
-        if: always()
-        uses: actions/upload-artifact@v3
-        with:
-          name: leetcode-raw-responses
-          path: cache/raw_responses
