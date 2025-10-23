@@ -3,7 +3,7 @@ name: LeetCode Monitor
 on:
   schedule:
     - cron: "*/5 * * * *" # Runs every hour
-  workflow_dispatch: # Optional: allows manual trigger
+#   workflow_dispatch: # Optional: allows manual trigger
 
 jobs:
   run-leetcode-monitor:
