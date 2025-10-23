@@ -57,7 +57,7 @@ jobs:
 
       - name: Upload raw responses (optional)
         if: always()
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: leetcode-raw-responses
           path: cache/raw_responses
