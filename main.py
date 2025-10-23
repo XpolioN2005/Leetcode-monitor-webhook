@@ -1,22 +1,22 @@
 import json
 import os
 import sys
+import hashlib
 import requests
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from PIL import Image, ImageDraw, ImageFont
 
 # ------------------ CONFIG ------------------
-USERS = ["xpolion", "Sandipan-developer","anirbansarkarsk"]  # LeetCode usernames
+USERS = ["xpolion", "Sandipan-developer", "anirbansarkarsk", "rishabhchatterjee"]
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 IMAGE_FILE = "leetcode_table.png"
+CACHE_DIR = os.getenv("GITHUB_WORKSPACE", ".") + "/cache"
+os.makedirs(CACHE_DIR, exist_ok=True)
+STATS_CACHE_FILE = os.path.join(CACHE_DIR, "leetcode_stats_cache.json")
 GRAPHQL_URL = "https://leetcode.com/graphql"
 
 # ------------------ OS-AWARE FONT ------------------
 def get_system_font(font_size=14):
-    """
-    Returns an anti-aliased system TrueType font depending on the OS.
-    Falls back to PIL default font if unavailable.
-    """
     try:
         if sys.platform.startswith("win"):
             font_path = "C:/Windows/Fonts/arial.ttf"
@@ -29,12 +29,10 @@ def get_system_font(font_size=14):
 
         if font_path and os.path.exists(font_path):
             return ImageFont.truetype(font_path, font_size)
-        else:
-            return ImageFont.load_default()
+        return ImageFont.load_default()
     except:
         return ImageFont.load_default()
 
-# ---------- FONT ----------
 FONT_SIZE = 14
 font = get_system_font(FONT_SIZE)
 
@@ -62,10 +60,10 @@ def fetch_leetcode_stats(username: str):
         "Content-Type": "application/json",
         "Accept": "application/json",
     }
-
     response = requests.post(GRAPHQL_URL, json=payload, headers=headers, timeout=10)
     response.raise_for_status()
     data = response.json()
+
     matched = data.get("data", {}).get("matchedUser")
     if not matched:
         raise ValueError(f"User '{username}' not found or profile is private.")
@@ -83,10 +81,46 @@ def fetch_leetcode_stats(username: str):
     result["ranking"] = matched["profile"].get("ranking")
     return result
 
-# ------------------ GENERATE TABLE IMAGE ------------------
+# ------------------ HASH CHECK ------------------
+def stats_changed(new_stats, cache_file=STATS_CACHE_FILE):
+    new_stats_str = json.dumps(new_stats, sort_keys=True)
+    new_hash = hashlib.md5(new_stats_str.encode()).hexdigest()
+
+    if os.path.exists(cache_file):
+        with open(cache_file, "r") as f:
+            cache = json.load(f)
+        if cache.get("hash") == new_hash:
+            return False  # No changes
+
+    # Save new hash
+    with open(cache_file, "w") as f:
+        json.dump({"hash": new_hash, "stats": new_stats}, f, indent=2)
+    return True
+
 def generate_table_image(users_stats, filename=IMAGE_FILE):
-    headers = ["NAME", "RANK", "EASY", "MEDIUM", "HARD", "TOTAL"]
-    rows = [[u['username'], str(u['ranking']), str(u['easy']), str(u['medium']), str(u['hard']), str(u['total'])] for u in users_stats]
+    headers = ["#", "NAME", "RANK", "EASY", "MEDIUM", "HARD", "TOTAL"]
+    rows = []
+    for i, u in enumerate(users_stats):
+        pos = i + 1
+        if pos == 1:
+            rank_color = (255, 215, 0)      # gold
+        elif pos == 2:
+            rank_color = (192, 192, 192)    # silver
+        elif pos == 3:
+            rank_color = (205, 127, 50)     # bronze
+        else:
+            rank_color = (255, 255, 255)    # white for others
+
+        rows.append([
+            str(pos),
+            u["username"],
+            str(u.get("ranking") or "—"),
+            str(u.get("easy", 0)),
+            str(u.get("medium", 0)),
+            str(u.get("hard", 0)),
+            str(u.get("total", 0))
+        ])
+        u["_rank_color"] = rank_color  # store for later drawing color
 
     # ---------- COLORS ----------
     bg_color = (30, 30, 30)
@@ -103,20 +137,20 @@ def generate_table_image(users_stats, filename=IMAGE_FILE):
     padding_y = 10
 
     # ---------- MEASURE COLUMN WIDTHS ----------
-    temp_img = Image.new("RGB", (1,1))
+    temp_img = Image.new("RGB", (1, 1))
     draw = ImageDraw.Draw(temp_img)
     col_widths = []
     for i, h in enumerate(headers):
-        max_width = draw.textbbox((0,0), h, font=font)[2]
+        max_width = draw.textbbox((0, 0), h, font=font)[2]
         for row in rows:
-            w = draw.textbbox((0,0), row[i], font=font)[2]
+            w = draw.textbbox((0, 0), row[i], font=font)[2]
             if w > max_width:
                 max_width = w
-        col_widths.append(max_width + padding_x*2)
+        col_widths.append(max_width + padding_x * 2)
 
-    row_height = draw.textbbox((0,0), "Hg", font=font)[3] + padding_y*2
+    row_height = draw.textbbox((0, 0), "Hg", font=font)[3] + padding_y * 2
     img_width = sum(col_widths)
-    img_height = row_height * (len(rows)+1) + padding_y*2
+    img_height = row_height * (len(rows) + 1) + padding_y * 2
 
     # ---------- CREATE IMAGE ----------
     img = Image.new("RGB", (img_width, img_height), color=bg_color)
@@ -126,19 +160,16 @@ def generate_table_image(users_stats, filename=IMAGE_FILE):
     x_offset = 0
     y_offset = padding_y
     for i, h in enumerate(headers):
-        draw.rectangle([x_offset, y_offset, x_offset + col_widths[i], y_offset + row_height], fill=header_bg_color)
-        w = draw.textbbox((0,0), h, font=font)[2]
-        h_text = draw.textbbox((0,0), h, font=font)[3]
-        text_x = x_offset + (col_widths[i]-w)//2 if i != 0 else x_offset + padding_x//2
-        text_y = y_offset + (row_height - h_text)//2
+        draw.rectangle(
+            [x_offset, y_offset, x_offset + col_widths[i], y_offset + row_height],
+            fill=header_bg_color,
+        )
+        w = draw.textbbox((0, 0), h, font=font)[2]
+        h_text = draw.textbbox((0, 0), h, font=font)[3]
+        text_x = x_offset + (col_widths[i] - w) // 2
+        text_y = y_offset + (row_height - h_text) // 2
         draw.text((text_x, text_y), h, fill=header_color, font=font)
         x_offset += col_widths[i]
-
-    # Vertical lines after header
-    x_line = 0
-    for width in col_widths[:-1]:
-        x_line += width
-        draw.line([(x_line, y_offset), (x_line, y_offset + row_height)], fill=line_color)
 
     # ---------- ROWS ----------
     y_offset += row_height
@@ -148,36 +179,36 @@ def generate_table_image(users_stats, filename=IMAGE_FILE):
 
         x_offset = 0
         for i, cell in enumerate(row):
-            # Color by column
-            if i == 2: color = easy_color
-            elif i == 3: color = medium_color
-            elif i == 4: color = hard_color
-            elif i in [1,5]: color = total_color
-            else: color = total_color  # NAME
+            if i == 0:
+                color = users_stats[idx]["_rank_color"]
+            elif i == 3:
+                color = easy_color
+            elif i == 4:
+                color = medium_color
+            elif i == 5:
+                color = hard_color
+            else:
+                color = total_color  # name, rank, total
 
-            w = draw.textbbox((0,0), cell, font=font)[2]
-            h_text = draw.textbbox((0,0), cell, font=font)[3]
-            text_x = x_offset + (col_widths[i]-w)//2 if i != 0 else x_offset + padding_x//2
-            text_y = y_offset + (row_height - h_text)//2
+            w = draw.textbbox((0, 0), cell, font=font)[2]
+            h_text = draw.textbbox((0, 0), cell, font=font)[3]
+            text_x = x_offset + (col_widths[i] - w) // 2 if i != 1 else x_offset + padding_x // 2
+            text_y = y_offset + (row_height - h_text) // 2
             draw.text((text_x, text_y), cell, fill=color, font=font)
             x_offset += col_widths[i]
-
-        # Vertical lines for row
-        x_line = 0
-        for width in col_widths[:-1]:
-            x_line += width
-            draw.line([(x_line, y_offset), (x_line, y_offset + row_height)], fill=line_color)
 
         y_offset += row_height
 
     img.save(filename)
-    print(f"Dark-themed table image saved to {filename}")
+    print(f"Leaderboard image saved: {filename}")
 
 # ------------------ SEND IMAGE IN EMBED ------------------
 def send_image_embed_discord(filename=IMAGE_FILE, webhook_url=WEBHOOK_URL):
-    # IST timestamp
-    ist_time = datetime.utcnow() + timedelta(hours=5, minutes=30)
-    timestamp = ist_time.strftime("%Y-%m-%d %H:%M:%S")
+    # IST timestamp (timezone-aware)
+    now_utc = datetime.now(timezone.utc)
+    IST = timezone(timedelta(hours=5, minutes=30))
+    now_ist = now_utc.astimezone(IST)
+    timestamp = now_ist.strftime("%Y-%m-%d %H:%M:%S")
 
     with open(filename, "rb") as f:
         multipart_data = {
@@ -187,7 +218,7 @@ def send_image_embed_discord(filename=IMAGE_FILE, webhook_url=WEBHOOK_URL):
                     "username": "LeetCode Monitor",
                     "embeds": [
                         {
-                            "title": "LeetCode Stats",
+                            "title": "LeetCode Stats - ByteBuilders",
                             "color": 0xFF6600,
                             "image": {"url": f"attachment://{filename}"},
                             "footer": {"text": f"Updated: {timestamp} IST"}
@@ -207,6 +238,19 @@ def send_image_embed_discord(filename=IMAGE_FILE, webhook_url=WEBHOOK_URL):
         print("Failed to send embed:", response.status_code, response.text)
 
 # ------------------ MAIN ------------------
+def rank_key(u):
+    """Return integer rank for sorting; missing or non-int ranks go to the end."""
+    r = u.get("ranking")
+    if r is None or r == "":
+        return 10**12
+    try:
+        return int(r)
+    except Exception:
+        try:
+            return int(float(r))
+        except Exception:
+            return 10**12
+
 if __name__ == "__main__":
     users_stats = []
     for username in USERS:
@@ -217,6 +261,16 @@ if __name__ == "__main__":
         except Exception as e:
             print(f"Error fetching {username}: {e}")
 
-    if users_stats:
+    if not users_stats:
+        print("No stats fetched; exiting.")
+        sys.exit(0)
+
+    # ---- Sort by rank (ascending). Users with no rank go last. ----
+    users_stats.sort(key=rank_key)
+
+    if users_stats and stats_changed(users_stats):
+        print("Stats changed! Generating image and sending to Discord...")
         generate_table_image(users_stats)
         send_image_embed_discord()
+    else:
+        print("No changes in stats. Skipping image generation and Discord message.")

@@ -1,9 +1,12 @@
 name: LeetCode Monitor
 
 on:
+  push:
+    branches:
+      - main
   schedule:
-    - cron: "0 * * * *" # Runs every hour
-#   workflow_dispatch: # Optional: allows manual trigger
+    - cron: "0 * * * *" # Runs every hour (UTC)
+  workflow_dispatch:
 
 jobs:
   run-leetcode-monitor:
@@ -13,10 +16,26 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v3
 
+      - name: Download previous cache (if any)
+        uses: actions/download-artifact@v3
+        with:
+          name: leetcode-cache
+          path: cache
+        # If first run there's no artifact; don't fail the job
+        continue-on-error: true
+
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: "3.11"
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
 
       - name: Install dependencies
         run: |
@@ -28,3 +47,17 @@ jobs:
           WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
         run: |
           python main.py
+
+      - name: Upload cache artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: leetcode-cache
+          # upload the cache dir (script writes cache/leetcode_stats_cache.json)
+          path: cache/leetcode_stats_cache.json
+
+      - name: Upload raw responses (optional)
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: leetcode-raw-responses
+          path: cache/raw_responses
