@@ -5,7 +5,7 @@ on:
     branches:
       - main
   schedule:
-    - cron: "0 * * * *" # Runs every hour (UTC)
+    - cron: "30 5 * * *" #ist 00 :00
   workflow_dispatch:
 
 jobs:
