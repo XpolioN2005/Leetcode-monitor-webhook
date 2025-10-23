@@ -27,4 +27,4 @@ jobs:
         env:
           WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
         run: |
-          python leetcode_monitor.py
+          python main.py
