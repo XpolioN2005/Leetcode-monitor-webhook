@@ -252,6 +252,10 @@ def rank_key(u):
             return 10**12
 
 if __name__ == "__main__":
+    if not os.path.exists(STATS_CACHE_FILE):
+        with open(STATS_CACHE_FILE, "w") as f:
+            json.dump({"hash": "", "stats": []}, f)
+
     users_stats = []
     for username in USERS:
         try:

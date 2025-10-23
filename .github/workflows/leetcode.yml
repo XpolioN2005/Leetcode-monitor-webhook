@@ -21,8 +21,12 @@ jobs:
         with:
           name: leetcode-cache
           path: cache
-        # If first run there's no artifact; don't fail the job
         continue-on-error: true
+
+      - name: List cache folder after download
+        run: |
+          echo "Listing files in cache folder after download:"
+          ls -lah cache || echo "Cache folder does not exist"
 
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -48,9 +52,13 @@ jobs:
         run: |
           python main.py
 
+      - name: Check cache file before upload
+        run: |
+          echo "Checking file to upload:"
+          ls -lah cache/leetcode_stats_cache.json || echo "Cache file not found!"
+
       - name: Upload cache artifact
         uses: actions/upload-artifact@v4
         with:
           name: leetcode-cache
-          # upload the cache dir (script writes cache/leetcode_stats_cache.json)
           path: cache/leetcode_stats_cache.json
